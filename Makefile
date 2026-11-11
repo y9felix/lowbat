@@ -9,7 +9,7 @@ PKGS = wayland-client
 
 CPPFLAGS = -DVERSION=\"$(VERSION)\" $$(pkg-config --cflags $(PKGS))
 CFLAGS = -std=c99 -pedantic -Wall -Wextra -Werror -O2
-LDFLAGS = -s $$(pkg-config --libs $(PKGS)) -lm
+LDFLAGS = -s $$(pkg-config --libs $(PKGS))
 
 PROTO_XML = protocols/wlr-layer-shell-unstable-v1.xml
 PROTO_H = wlr-layer-shell-unstable-v1-client-protocol.h
@@ -47,6 +47,7 @@ clean:
 
 install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(PROG)
 	cp -f $(PROG) $(DESTDIR)$(PREFIX)/bin
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/$(PROG)
 

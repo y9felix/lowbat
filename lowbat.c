@@ -43,13 +43,11 @@ static int read_battery(int *cap, int *dis);
 static int read_sysfs(const char *sub, char *b, size_t sz);
 static void reg_glob(void *d, struct wl_registry *r, uint32_t n, const char *i, uint32_t v);
 static void reg_remove(void *d, struct wl_registry *r, uint32_t n);
-static void render(uint32_t *p, int w, int h, int cap, int level);
+static void render(uint32_t *p, int w, int h, int cap);
 static void seat_caps(void *d, struct wl_seat *s, uint32_t c);
 static void seat_name(void *d, struct wl_seat *s, const char *name);
-static int show_popup(int cap, int level);
+static int show_popup(int cap);
 static void usage(void);
-
-const struct wl_interface xdg_popup_interface;
 
 static const struct glyph font[] = {
 	{ '0', { 0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E } },
@@ -110,6 +108,8 @@ static const struct wl_registry_listener reg_l = {
 	.global_remove = reg_remove
 };
 
+const struct wl_interface xdg_popup_interface;
+
 static struct wl_compositor *comp;
 static struct wl_shm *shm;
 static struct zwlr_layer_shell_v1 *shell;
@@ -131,7 +131,7 @@ draw_text(uint32_t *p, int w, int h, int cx, int y, const char *s, int sc, uint3
 
 	x = cx - ((int)strlen(s) * 6 * sc - sc) / 2;
 	for (; *s; s++, x += 6 * sc) {
-		for (i = 0; i < sizeof(font) / sizeof(font[0]); i++) {
+		for (i = 0; i < sizeof(font) / sizeof(*font); i++) {
 			if (font[i].c != *s)
 				continue;
 			for (r = 0; r < 7; r++) {
@@ -312,16 +312,18 @@ read_battery(int *cap, int *dis)
 	char *end;
 	long val;
 
+	if (read_sysfs("status", b, sizeof(b)) < 0)
+		return -1;
+	*dis = (b[0] == 'D');
+	if (!*dis)
+		return 0;
 	if (read_sysfs("capacity", b, sizeof(b)) < 0)
 		return -1;
 	errno = 0;
 	val = strtol(b, &end, 10);
-	if (end == b || errno != 0)
+	if (end == b || errno != 0 || val < 0 || val > 100)
 		return -1;
 	*cap = (int)val;
-	if (read_sysfs("status", b, sizeof(b)) < 0)
-		return -1;
-	*dis = (b[0] == 'D' ? 1 : 0);
 	return 0;
 }
 
@@ -333,7 +335,7 @@ read_sysfs(const char *sub, char *b, size_t sz)
 	ssize_t n;
 
 	snprintf(p, sizeof(p), "%s/%s", bat_path, sub);
-	if ((fd = open(p, O_RDONLY)) < 0)
+	if ((fd = open(p, O_RDONLY | O_CLOEXEC)) < 0)
 		return -1;
 	while ((n = read(fd, b, sz - 1)) < 0 && errno == EINTR)
 		continue;
@@ -368,7 +370,7 @@ reg_remove(void *d, struct wl_registry *r, uint32_t n)
 }
 
 static void
-render(uint32_t *p, int w, int h, int cap, int level)
+render(uint32_t *p, int w, int h, int cap)
 {
 	char pct[16];
 	int b;
@@ -378,7 +380,7 @@ render(uint32_t *p, int w, int h, int cap, int level)
 
 	b = border_width * scale;
 	cx = w / 2;
-	c = level <= level_crit;
+	c = cap <= level_crit;
 	col = c ? color_crit_accent : color_low_accent;
 	fill(p, w, h, 0, 0, w, h, col);
 	fill(p, w, h, b, b, w - 2 * b, h - 2 * b, color_bg);
@@ -407,7 +409,7 @@ seat_name(void *d, struct wl_seat *s, const char *name)
 }
 
 static int
-show_popup(int cap, int level)
+show_popup(int cap)
 {
 	char b[16];
 	struct pollfd pfd;
@@ -438,12 +440,16 @@ show_popup(int cap, int level)
 		goto close_fd;
 	if ((px = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED)
 		goto close_fd;
-	render(px, w, h, cap, level);
-	pool = wl_shm_create_pool(shm, fd, (int32_t)sz);
+	render(px, w, h, cap);
+	munmap(px, sz);
+	if (!(pool = wl_shm_create_pool(shm, fd, (int32_t)sz)))
+		goto close_fd;
 	buf = wl_shm_pool_create_buffer(pool, 0, w, h, w * 4, WL_SHM_FORMAT_ARGB8888);
 	wl_shm_pool_destroy(pool);
 	close(fd);
 	fd = -1;
+	if (!buf)
+		goto disconnect_dpy;
 	if (!(surf = wl_compositor_create_surface(comp)))
 		goto destroy_buf;
 	if (!(ls = zwlr_layer_shell_v1_get_layer_surface(shell, surf, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "lowbat")))
@@ -456,26 +462,33 @@ show_popup(int cap, int level)
 	wl_surface_commit(surf);
 	pfd.fd = wl_display_get_fd(dpy);
 	pfd.events = POLLIN;
-	pfd.revents = 0;
 	while (!done) {
-		while (wl_display_prepare_read(dpy) < 0)
-			wl_display_dispatch_pending(dpy);
-		wl_display_flush(dpy);
-		if (poll(&pfd, 1, poll_timeout) > 0)
-			wl_display_read_events(dpy);
-		else
+		while (wl_display_prepare_read(dpy) < 0) {
+			if (wl_display_dispatch_pending(dpy) < 0)
+				goto destroy_ls;
+		}
+		if (wl_display_flush(dpy) < 0 && errno != EAGAIN) {
 			wl_display_cancel_read(dpy);
-		wl_display_dispatch_pending(dpy);
-		if (test_pct < 0 && read_sysfs("status", b, sizeof(b)) == 0 && b[0] != 'D')
+			goto destroy_ls;
+		}
+		if (poll(&pfd, 1, poll_timeout) > 0) {
+			if (wl_display_read_events(dpy) < 0)
+				goto destroy_ls;
+		} else {
+			wl_display_cancel_read(dpy);
+		}
+		if (wl_display_dispatch_pending(dpy) < 0)
+			goto destroy_ls;
+		if (test_pct < 0 && !read_sysfs("status", b, sizeof(b)) && b[0] != 'D')
 			break;
 	}
 	ret = 0;
+destroy_ls:
 	zwlr_layer_surface_v1_destroy(ls);
 destroy_surf:
 	wl_surface_destroy(surf);
 destroy_buf:
 	wl_buffer_destroy(buf);
-	munmap(px, sz);
 close_fd:
 	if (fd >= 0)
 		close(fd);
@@ -502,7 +515,6 @@ main(int argc, char *argv[])
 	char *end;
 	int cap;
 	int dis;
-	int level;
 	int opt;
 	int shown;
 	int want;
@@ -521,7 +533,7 @@ main(int argc, char *argv[])
 		case 's':
 			errno = 0;
 			val = strtol(optarg, &end, 10);
-			if (*optarg == '\0' || *end != '\0' || errno != 0 || val < 1)
+			if (*optarg == '\0' || *end != '\0' || errno != 0 || val < 1 || val > 16)
 				usage();
 			scale = (int)val;
 			break;
@@ -544,23 +556,23 @@ main(int argc, char *argv[])
 	argv += optind;
 	if (argc > 0)
 		usage();
-	if (test_pct >= 0) {
-		level = test_pct <= level_crit ? level_crit : level_low;
-		if (show_popup(test_pct, level) < 0)
-			return 1;
-		return 0;
-	}
+	if (test_pct >= 0)
+		return show_popup(test_pct) < 0 ? 1 : 0;
 	for (;;) {
-		if (read_battery(&cap, &dis) == 0) {
+		if (read_battery(&cap, &dis) < 0) {
+			sleep((unsigned int)poll_interval);
+			continue;
+		}
+		if (!dis) {
+			shown = 101;
+		} else {
 			if (cap <= level_crit)
 				want = level_crit;
 			else if (cap <= level_low)
 				want = level_low;
 			else
 				want = 0;
-			if (!dis)
-				shown = 101;
-			else if (want && want < shown && show_popup(cap, want) == 0)
+			if (want && want < shown && !show_popup(cap))
 				shown = want;
 		}
 		sleep((unsigned int)poll_interval);
