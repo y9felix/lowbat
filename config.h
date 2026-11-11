@@ -1,27 +1,27 @@
-static const int poll_interval = 20;
-static const int poll_timeout  = 500;
-static const int level_low     = 15;
-static const int level_crit    = 5;
-static const int default_scale = 1;
-static const int default_grab  = 1;
+enum {
+	POLL_INTERVAL = 20,
+	POLL_TIMEOUT  = 500,
+	LEVEL_LOW     = 15,
+	LEVEL_CRIT    = 5,
+	DEFAULT_SCALE = 1,
+	DEFAULT_GRAB  = 1,
+	POPUP_WIDTH   = 440,
+	POPUP_HEIGHT  = 176,
+	BORDER_WIDTH  = 3,
+	Y_TITLE       = 20,
+	Y_PERCENT     = 62,
+	Y_ACTION      = 132,
+	SCALE_TITLE   = 4,
+	SCALE_PERCENT = 8,
+	SCALE_ACTION  = 3
+};
 
-static const int popup_width   = 440;
-static const int popup_height  = 176;
-static const int border_width  = 3;
+#define COLOR_BG          0xff000000
+#define COLOR_TEXT        0xffffffff
+#define COLOR_LOW_ACCENT  0xff7e56c3
+#define COLOR_CRIT_ACCENT 0xff8000ff
 
-static const int y_title       = 20;
-static const int y_percent     = 62;
-static const int y_action      = 132;
-static const int scale_title   = 4;
-static const int scale_percent = 8;
-static const int scale_action  = 3;
-
-static const uint32_t color_bg          = 0xff000000;
-static const uint32_t color_text        = 0xffffffff;
-static const uint32_t color_low_accent  = 0xff7e56c3;
-static const uint32_t color_crit_accent = 0xff8000ff;
-
-static const char *bat_path     = "/sys/class/power_supply/BAT0";
-static const char *msg_low      = "BATTERY LOW";
-static const char *msg_critical = "BATTERY CRITICAL";
-static const char *msg_action   = "PLUG IN CHARGER";
+#define BAT_PATH          "/sys/class/power_supply/BAT0"
+#define MSG_LOW           "BATTERY LOW"
+#define MSG_CRITICAL      "BATTERY CRITICAL"
+#define MSG_ACTION        "PLUG IN CHARGER"
