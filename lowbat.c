@@ -170,14 +170,10 @@ render(uint32_t *p, int w, int h, int cap)
 	col = cap <= LEVEL_CRIT ? COLOR_CRIT_ACCENT : COLOR_LOW_ACCENT;
 	fill(p, w, h, 0, 0, w, h, col);
 	fill(p, w, h, b, b, w - 2 * b, h - 2 * b, COLOR_BG);
-	drawtext(p, w, h, cx, Y_TITLE * scale,
-	    cap <= LEVEL_CRIT ? MSG_CRITICAL : MSG_LOW,
-	    SCALE_TITLE * scale, COLOR_TEXT);
+	drawtext(p, w, h, cx, Y_TITLE * scale, cap <= LEVEL_CRIT ? MSG_CRITICAL : MSG_LOW, SCALE_TITLE * scale, COLOR_TEXT);
 	snprintf(pct, sizeof(pct), "%d%%", cap);
-	drawtext(p, w, h, cx, Y_PERCENT * scale, pct,
-	    SCALE_PERCENT * scale, col);
-	drawtext(p, w, h, cx, Y_ACTION * scale, MSG_ACTION,
-	    SCALE_ACTION * scale, COLOR_TEXT);
+	drawtext(p, w, h, cx, Y_PERCENT * scale, pct, SCALE_PERCENT * scale, col);
+	drawtext(p, w, h, cx, Y_ACTION * scale, MSG_ACTION, SCALE_ACTION * scale, COLOR_TEXT);
 }
 
 static int
@@ -238,8 +234,7 @@ regglob(void *d, struct wl_registry *r, uint32_t n, const char *i, uint32_t v)
 	else if (!strcmp(i, zwlr_layer_shell_v1_interface.name))
 		shell = wl_registry_bind(r, n, &zwlr_layer_shell_v1_interface, 1);
 	else if (!strcmp(i, wl_seat_interface.name))
-		wl_seat_add_listener(wl_registry_bind(r, n,
-		    &wl_seat_interface, 1), &seatlistener, NULL);
+		wl_seat_add_listener(wl_registry_bind(r, n, &wl_seat_interface, 1), &seatlistener, NULL);
 }
 
 static void
@@ -449,15 +444,13 @@ showpopup(int cap)
 		goto disconnectdpy;
 	if (!(surf = wl_compositor_create_surface(comp)))
 		goto destroybuf;
-	if (!(ls = zwlr_layer_shell_v1_get_layer_surface(shell, surf, NULL,
-	    ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "lowbat")))
+	if (!(ls = zwlr_layer_shell_v1_get_layer_surface(shell, surf, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "lowbat")))
 		goto destroysurf;
 	zwlr_layer_surface_v1_add_listener(ls, &lslistener, NULL);
 	zwlr_layer_surface_v1_set_size(ls, (uint32_t)w, (uint32_t)h);
 	zwlr_layer_surface_v1_set_exclusive_zone(ls, -1);
 	if (grabkbd)
-		zwlr_layer_surface_v1_set_keyboard_interactivity(ls,
-		    ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
+		zwlr_layer_surface_v1_set_keyboard_interactivity(ls, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
 	wl_surface_commit(surf);
 	pfd.fd = wl_display_get_fd(dpy);
 	pfd.events = POLLIN;
