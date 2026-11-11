@@ -22,10 +22,6 @@ all: $(PROG)
 
 $(OBJ): config.h $(PROTO_H)
 
-config.h:
-	cp config.def.h $@
-	chmod 644 $@
-
 $(PROTO_H): $(PROTO_XML)
 	$(WAYLAND_SCANNER) client-header $< $@
 	chmod 644 $@

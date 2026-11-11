@@ -35,13 +35,13 @@ static void seatname(void *d, struct wl_seat *s, const char *name);
 static void lscfg(void *d, struct zwlr_layer_surface_v1 *l, uint32_t s, uint32_t w, uint32_t h);
 static void lsclosed(void *d, struct zwlr_layer_surface_v1 *l);
 static void kbmap(void *d, struct wl_keyboard *k, uint32_t f, int32_t fd, uint32_t sz);
-static void kbenter(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *surf, struct wl_array *keys);
-static void kbleave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *surf);
+static void kbenter(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf, struct wl_array *keys);
+static void kbleave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf);
 static void kbkey(void *d, struct wl_keyboard *k, uint32_t s, uint32_t t, uint32_t key, uint32_t st);
 static void kbmodifiers(void *d, struct wl_keyboard *k, uint32_t s, uint32_t dep, uint32_t lat, uint32_t lck, uint32_t grp);
 static void kbrepeatinfo(void *d, struct wl_keyboard *k, int32_t rate, int32_t delay);
-static void ptrenter(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *surf, wl_fixed_t sx, wl_fixed_t sy);
-static void ptrleave(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *surf);
+static void ptrenter(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf, wl_fixed_t sx, wl_fixed_t sy);
+static void ptrleave(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf);
 static void ptrmotion(void *d, struct wl_pointer *p, uint32_t t, wl_fixed_t sx, wl_fixed_t sy);
 static void ptrbtn(void *d, struct wl_pointer *p, uint32_t s, uint32_t t, uint32_t b, uint32_t st);
 static void ptraxis(void *d, struct wl_pointer *p, uint32_t t, uint32_t a, wl_fixed_t v);
@@ -115,7 +115,6 @@ static struct wl_shm *shm;
 static struct zwlr_layer_shell_v1 *shell;
 static struct wl_surface *surf;
 static struct wl_buffer *buf;
-static char *argv0;
 static int scale = DEFAULT_SCALE;
 static int grabkbd = DEFAULT_GRAB;
 static int testpct = -1;
@@ -188,7 +187,8 @@ readsysfs(const char *sub, char *b, size_t sz)
 	int fd;
 	ssize_t n;
 
-	snprintf(p, sizeof(p), "%s/%s", BAT_PATH, sub);
+	if (snprintf(p, sizeof(p), "%s/%s", BAT_PATH, sub) >= (int)sizeof(p))
+		return -1;
 	if ((fd = open(p, O_RDONLY | O_CLOEXEC)) < 0)
 		return -1;
 	while ((n = read(fd, b, sz - 1)) < 0 && errno == EINTR)
@@ -196,6 +196,8 @@ readsysfs(const char *sub, char *b, size_t sz)
 	close(fd);
 	if (n <= 0)
 		return -1;
+	while (n > 0 && (b[n - 1] == '\n' || b[n - 1] == '\r'))
+		n--;
 	b[n] = '\0';
 	return 0;
 }
@@ -210,13 +212,15 @@ readbattery(int *cap, int *dis)
 	if (readsysfs("status", b, sizeof(b)) < 0)
 		return -1;
 	*dis = b[0] == 'D';
-	if (!*dis)
+	if (!*dis) {
+		*cap = -1;
 		return 0;
+	}
 	if (readsysfs("capacity", b, sizeof(b)) < 0)
 		return -1;
 	errno = 0;
 	val = strtol(b, &end, 10);
-	if (end == b || errno || val < 0 || val > 100)
+	if (end == b || *end || errno || val < 0 || val > 100)
 		return -1;
 	*cap = (int)val;
 	return 0;
@@ -294,22 +298,22 @@ kbmap(void *d, struct wl_keyboard *k, uint32_t f, int32_t fd, uint32_t sz)
 }
 
 static void
-kbenter(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *surf, struct wl_array *keys)
+kbenter(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf, struct wl_array *keys)
 {
 	(void)d;
 	(void)k;
 	(void)s;
-	(void)surf;
+	(void)sf;
 	(void)keys;
 }
 
 static void
-kbleave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *surf)
+kbleave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf)
 {
 	(void)d;
 	(void)k;
 	(void)s;
-	(void)surf;
+	(void)sf;
 }
 
 static void
@@ -346,23 +350,23 @@ kbrepeatinfo(void *d, struct wl_keyboard *k, int32_t rate, int32_t delay)
 }
 
 static void
-ptrenter(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *surf, wl_fixed_t sx, wl_fixed_t sy)
+ptrenter(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf, wl_fixed_t sx, wl_fixed_t sy)
 {
 	(void)d;
 	(void)p;
 	(void)s;
-	(void)surf;
+	(void)sf;
 	(void)sx;
 	(void)sy;
 }
 
 static void
-ptrleave(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *surf)
+ptrleave(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf)
 {
 	(void)d;
 	(void)p;
 	(void)s;
-	(void)surf;
+	(void)sf;
 }
 
 static void
@@ -500,7 +504,7 @@ disconnectdpy:
 static void
 usage(void)
 {
-	fprintf(stderr, "usage: %s [-hnv] [-s scale] [-t percent]\n", argv0);
+	fprintf(stderr, "usage: %s [-hnv] [-s scale] [-t percent]\n", program_invocation_short_name);
 	exit(1);
 }
 
@@ -511,7 +515,6 @@ main(int argc, char *argv[])
 	int cap, dis, opt, shown, want;
 	long val;
 
-	argv0 = argv[0];
 	shown = 101;
 	while ((opt = getopt(argc, argv, "hns:t:v")) != -1) {
 		switch (opt) {
@@ -547,7 +550,7 @@ main(int argc, char *argv[])
 	if (argc)
 		usage();
 	if (testpct >= 0)
-		return showpopup(testpct) < 0 ? 1 : 0;
+		return showpopup(testpct) < 0;
 	for (;;) {
 		if (readbattery(&cap, &dis) >= 0) {
 			if (!dis) {
@@ -559,7 +562,7 @@ main(int argc, char *argv[])
 					want = LEVEL_LOW;
 				else
 					want = 0;
-				if (want && want < shown && !showpopup(cap))
+				if (want && want < shown && showpopup(cap) >= 0)
 					shown = want;
 			}
 		}
