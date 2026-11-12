@@ -65,9 +65,6 @@ static const struct glyph font[] = {
 	{ 'Y', { 0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04 } }
 };
 
-static int scale = DEFAULT_SCALE;
-static int grabkbd = DEFAULT_GRAB;
-
 static void
 fill(uint32_t *p, int w, int h, int x, int y, int rw, int rh, uint32_t col)
 {
@@ -107,7 +104,7 @@ drawtext(uint32_t *p, int w, int h, int cx, int y, const char *s, int sc, uint32
 }
 
 static void
-render(uint32_t *p, int w, int h, int cap)
+render(uint32_t *p, int w, int h, int cap, int scale)
 {
 	char pct[16];
 	int b, cx;
@@ -294,9 +291,9 @@ ptrframe(void *d, struct wl_pointer *p)
 }
 
 static void
-seatcaps(void *d, struct wl_seat *s, uint32_t c)
+seatcaps(void *d, struct wl_seat *s, uint32_t caps)
 {
-	struct client *cl = d;
+	struct client *c = d;
 	static const struct wl_pointer_listener ptrlistener = {
 		.enter = ptrenter,
 		.leave = ptrleave,
@@ -314,10 +311,10 @@ seatcaps(void *d, struct wl_seat *s, uint32_t c)
 		.repeat_info = kbrepeatinfo
 	};
 
-	if (c & WL_SEAT_CAPABILITY_POINTER)
-		wl_pointer_add_listener(wl_seat_get_pointer(s), &ptrlistener, cl);
-	if (cl->grabkbd && (c & WL_SEAT_CAPABILITY_KEYBOARD))
-		wl_keyboard_add_listener(wl_seat_get_keyboard(s), &kblistener, cl);
+	if (caps & WL_SEAT_CAPABILITY_POINTER)
+		wl_pointer_add_listener(wl_seat_get_pointer(s), &ptrlistener, c);
+	if (c->grabkbd && (caps & WL_SEAT_CAPABILITY_KEYBOARD))
+		wl_keyboard_add_listener(wl_seat_get_keyboard(s), &kblistener, c);
 }
 
 static void
@@ -378,7 +375,7 @@ lsclosed(void *d, struct zwlr_layer_surface_v1 *l)
 }
 
 static int
-showpopup(int cap, int istest)
+showpopup(int cap, int istest, int scale, int grabkbd)
 {
 	char b[16];
 	struct client c;
@@ -415,7 +412,7 @@ showpopup(int cap, int istest)
 		goto close_fd;
 	if ((px = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED)
 		goto close_fd;
-	render(px, w, h, cap);
+	render(px, w, h, cap, scale);
 	munmap(px, sz);
 	if (!(pool = wl_shm_create_pool(c.shm, fd, (int32_t)sz)))
 		goto close_fd;
@@ -432,7 +429,7 @@ showpopup(int cap, int istest)
 	zwlr_layer_surface_v1_add_listener(ls, &lslistener, &c);
 	zwlr_layer_surface_v1_set_size(ls, (uint32_t)w, (uint32_t)h);
 	zwlr_layer_surface_v1_set_exclusive_zone(ls, -1);
-	if (grabkbd)
+	if (c.grabkbd)
 		zwlr_layer_surface_v1_set_keyboard_interactivity(ls, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
 	wl_surface_commit(c.surf);
 	pfd.fd = wl_display_get_fd(dpy);
@@ -483,9 +480,11 @@ int
 main(int argc, char *argv[])
 {
 	char *end;
-	int cap, dis, opt, shown, testpct, want;
+	int cap, dis, grabkbd, opt, scale, shown, testpct, want;
 	long val;
 
+	grabkbd = DEFAULT_GRAB;
+	scale = DEFAULT_SCALE;
 	shown = 101;
 	testpct = -1;
 	while ((opt = getopt(argc, argv, "hns:t:v")) >= 0) {
@@ -522,7 +521,7 @@ main(int argc, char *argv[])
 	if (argc)
 		usage();
 	if (testpct >= 0) {
-		if (showpopup(testpct, 1) < 0)
+		if (showpopup(testpct, 1, scale, grabkbd) < 0)
 			return 1;
 		return 0;
 	}
@@ -537,7 +536,7 @@ main(int argc, char *argv[])
 					want = LEVEL_LOW;
 				else
 					want = 0;
-				if (want && want < shown && showpopup(cap, 0) >= 0)
+				if (want && want < shown && showpopup(cap, 0, scale, grabkbd) >= 0)
 					shown = want;
 			}
 		}
