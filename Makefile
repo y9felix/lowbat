@@ -1,5 +1,5 @@
 PROG = lowbat
-VERSION = 1.0
+VERSION = 1.0.0
 PREFIX = /usr/local
 
 CC = cc
@@ -21,6 +21,9 @@ OBJ = $(SRC:.c=.o)
 all: $(PROG)
 
 $(OBJ): config.h $(PROTO_H)
+
+config.h:
+	cp config.def.h $@
 
 $(PROTO_H): $(PROTO_XML)
 	$(WAYLAND_SCANNER) client-header $< $@
