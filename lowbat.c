@@ -23,24 +23,15 @@ struct glyph {
 	uint8_t r[7];
 };
 
-static void kbenter(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf, struct wl_array *keys);
-static void kbkey(void *d, struct wl_keyboard *k, uint32_t s, uint32_t t, uint32_t key, uint32_t st);
-static void kbleave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf);
-static void kbmap(void *d, struct wl_keyboard *k, uint32_t f, int32_t fd, uint32_t sz);
-static void kbmodifiers(void *d, struct wl_keyboard *k, uint32_t s, uint32_t dep, uint32_t lat, uint32_t lck, uint32_t grp);
-static void kbrepeatinfo(void *d, struct wl_keyboard *k, int32_t rate, int32_t delay);
-static void lscfg(void *d, struct zwlr_layer_surface_v1 *l, uint32_t s, uint32_t w, uint32_t h);
-static void lsclosed(void *d, struct zwlr_layer_surface_v1 *l);
-static void ptraxis(void *d, struct wl_pointer *p, uint32_t t, uint32_t a, wl_fixed_t v);
-static void ptrbtn(void *d, struct wl_pointer *p, uint32_t s, uint32_t t, uint32_t b, uint32_t st);
-static void ptrenter(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf, wl_fixed_t sx, wl_fixed_t sy);
-static void ptrframe(void *d, struct wl_pointer *p);
-static void ptrleave(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf);
-static void ptrmotion(void *d, struct wl_pointer *p, uint32_t t, wl_fixed_t sx, wl_fixed_t sy);
-static void regglob(void *d, struct wl_registry *r, uint32_t n, const char *i, uint32_t v);
-static void regremove(void *d, struct wl_registry *r, uint32_t n);
-static void seatcaps(void *d, struct wl_seat *s, uint32_t c);
-static void seatname(void *d, struct wl_seat *s, const char *name);
+struct client {
+	struct wl_compositor *comp;
+	struct wl_shm *shm;
+	struct zwlr_layer_shell_v1 *shell;
+	struct wl_surface *surf;
+	struct wl_buffer *buf;
+	int grabkbd;
+	int done;
+};
 
 const struct wl_interface xdg_popup_interface;
 
@@ -74,44 +65,8 @@ static const struct glyph font[] = {
 	{ 'Y', { 0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04 } }
 };
 
-static const struct wl_pointer_listener ptrlistener = {
-	.enter = ptrenter,
-	.leave = ptrleave,
-	.motion = ptrmotion,
-	.button = ptrbtn,
-	.axis = ptraxis,
-	.frame = ptrframe
-};
-static const struct wl_keyboard_listener kblistener = {
-	.keymap = kbmap,
-	.enter = kbenter,
-	.leave = kbleave,
-	.key = kbkey,
-	.modifiers = kbmodifiers,
-	.repeat_info = kbrepeatinfo
-};
-static const struct zwlr_layer_surface_v1_listener lslistener = {
-	.configure = lscfg,
-	.closed = lsclosed
-};
-static const struct wl_seat_listener seatlistener = {
-	.capabilities = seatcaps,
-	.name = seatname
-};
-static const struct wl_registry_listener reglistener = {
-	.global = regglob,
-	.global_remove = regremove
-};
-
-static struct wl_compositor *comp;
-static struct wl_shm *shm;
-static struct zwlr_layer_shell_v1 *shell;
-static struct wl_surface *surf;
-static struct wl_buffer *buf;
 static int scale = DEFAULT_SCALE;
 static int grabkbd = DEFAULT_GRAB;
-static int testpct = -1;
-static int done;
 
 static void
 fill(uint32_t *p, int w, int h, int x, int y, int rw, int rh, uint32_t col)
@@ -216,66 +171,6 @@ readbattery(int *cap, int *dis)
 }
 
 static void
-regglob(void *d, struct wl_registry *r, uint32_t n, const char *i, uint32_t v)
-{
-	(void)d;
-	(void)v;
-	if (!strcmp(i, wl_compositor_interface.name))
-		comp = wl_registry_bind(r, n, &wl_compositor_interface, 1);
-	else if (!strcmp(i, wl_shm_interface.name))
-		shm = wl_registry_bind(r, n, &wl_shm_interface, 1);
-	else if (!strcmp(i, zwlr_layer_shell_v1_interface.name))
-		shell = wl_registry_bind(r, n, &zwlr_layer_shell_v1_interface, 1);
-	else if (!strcmp(i, wl_seat_interface.name))
-		wl_seat_add_listener(wl_registry_bind(r, n, &wl_seat_interface, 1), &seatlistener, NULL);
-}
-
-static void
-regremove(void *d, struct wl_registry *r, uint32_t n)
-{
-	(void)d;
-	(void)r;
-	(void)n;
-}
-
-static void
-seatcaps(void *d, struct wl_seat *s, uint32_t c)
-{
-	(void)d;
-	if (c & WL_SEAT_CAPABILITY_POINTER)
-		wl_pointer_add_listener(wl_seat_get_pointer(s), &ptrlistener, NULL);
-	if (grabkbd && (c & WL_SEAT_CAPABILITY_KEYBOARD))
-		wl_keyboard_add_listener(wl_seat_get_keyboard(s), &kblistener, NULL);
-}
-
-static void
-seatname(void *d, struct wl_seat *s, const char *name)
-{
-	(void)d;
-	(void)s;
-	(void)name;
-}
-
-static void
-lscfg(void *d, struct zwlr_layer_surface_v1 *l, uint32_t s, uint32_t w, uint32_t h)
-{
-	(void)d;
-	(void)w;
-	(void)h;
-	zwlr_layer_surface_v1_ack_configure(l, s);
-	wl_surface_attach(surf, buf, 0, 0);
-	wl_surface_commit(surf);
-}
-
-static void
-lsclosed(void *d, struct zwlr_layer_surface_v1 *l)
-{
-	(void)d;
-	(void)l;
-	done = 1;
-}
-
-static void
 kbmap(void *d, struct wl_keyboard *k, uint32_t f, int32_t fd, uint32_t sz)
 {
 	(void)d;
@@ -307,13 +202,14 @@ kbleave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf)
 static void
 kbkey(void *d, struct wl_keyboard *k, uint32_t s, uint32_t t, uint32_t key, uint32_t st)
 {
-	(void)d;
+	struct client *c = d;
+
 	(void)k;
 	(void)s;
 	(void)t;
 	(void)key;
 	if (st)
-		done = 1;
+		c->done = 1;
 }
 
 static void
@@ -370,13 +266,14 @@ ptrmotion(void *d, struct wl_pointer *p, uint32_t t, wl_fixed_t sx, wl_fixed_t s
 static void
 ptrbtn(void *d, struct wl_pointer *p, uint32_t s, uint32_t t, uint32_t b, uint32_t st)
 {
-	(void)d;
+	struct client *c = d;
+
 	(void)p;
 	(void)s;
 	(void)t;
 	(void)b;
 	if (st)
-		done = 1;
+		c->done = 1;
 }
 
 static void
@@ -396,10 +293,95 @@ ptrframe(void *d, struct wl_pointer *p)
 	(void)p;
 }
 
+static void
+seatcaps(void *d, struct wl_seat *s, uint32_t c)
+{
+	struct client *cl = d;
+	static const struct wl_pointer_listener ptrlistener = {
+		.enter = ptrenter,
+		.leave = ptrleave,
+		.motion = ptrmotion,
+		.button = ptrbtn,
+		.axis = ptraxis,
+		.frame = ptrframe
+	};
+	static const struct wl_keyboard_listener kblistener = {
+		.keymap = kbmap,
+		.enter = kbenter,
+		.leave = kbleave,
+		.key = kbkey,
+		.modifiers = kbmodifiers,
+		.repeat_info = kbrepeatinfo
+	};
+
+	if (c & WL_SEAT_CAPABILITY_POINTER)
+		wl_pointer_add_listener(wl_seat_get_pointer(s), &ptrlistener, cl);
+	if (cl->grabkbd && (c & WL_SEAT_CAPABILITY_KEYBOARD))
+		wl_keyboard_add_listener(wl_seat_get_keyboard(s), &kblistener, cl);
+}
+
+static void
+seatname(void *d, struct wl_seat *s, const char *name)
+{
+	(void)d;
+	(void)s;
+	(void)name;
+}
+
+static void
+regglob(void *d, struct wl_registry *r, uint32_t n, const char *i, uint32_t v)
+{
+	struct client *c = d;
+	static const struct wl_seat_listener seatlistener = {
+		.capabilities = seatcaps,
+		.name = seatname
+	};
+
+	(void)v;
+	if (!strcmp(i, wl_compositor_interface.name))
+		c->comp = wl_registry_bind(r, n, &wl_compositor_interface, 1);
+	else if (!strcmp(i, wl_shm_interface.name))
+		c->shm = wl_registry_bind(r, n, &wl_shm_interface, 1);
+	else if (!strcmp(i, zwlr_layer_shell_v1_interface.name))
+		c->shell = wl_registry_bind(r, n, &zwlr_layer_shell_v1_interface, 1);
+	else if (!strcmp(i, wl_seat_interface.name))
+		wl_seat_add_listener(wl_registry_bind(r, n, &wl_seat_interface, 1), &seatlistener, c);
+}
+
+static void
+regremove(void *d, struct wl_registry *r, uint32_t n)
+{
+	(void)d;
+	(void)r;
+	(void)n;
+}
+
+static void
+lscfg(void *d, struct zwlr_layer_surface_v1 *l, uint32_t s, uint32_t w, uint32_t h)
+{
+	struct client *c = d;
+
+	(void)w;
+	(void)h;
+	zwlr_layer_surface_v1_ack_configure(l, s);
+	wl_surface_attach(c->surf, c->buf, 0, 0);
+	wl_surface_commit(c->surf);
+}
+
+static void
+lsclosed(void *d, struct zwlr_layer_surface_v1 *l)
+{
+	struct client *c = d;
+
+	(void)l;
+	c->done = 1;
+}
+
 static int
-showpopup(int cap)
+showpopup(int cap, int istest)
 {
 	char b[16];
+	struct client c;
 	struct pollfd pfd;
 	struct wl_display *dpy;
 	struct wl_shm_pool *pool;
@@ -407,16 +389,25 @@ showpopup(int cap)
 	size_t sz;
 	uint32_t *px;
 	int fd, h, ret, w;
+	static const struct zwlr_layer_surface_v1_listener lslistener = {
+		.configure = lscfg,
+		.closed = lsclosed
+	};
+	static const struct wl_registry_listener reglistener = {
+		.global = regglob,
+		.global_remove = regremove
+	};
 
+	memset(&c, 0, sizeof(c));
+	c.grabkbd = grabkbd;
 	ret = -1;
 	w = POPUP_WIDTH * scale;
 	h = POPUP_HEIGHT * scale;
 	sz = (size_t)w * (size_t)h * sizeof(*px);
-	done = 0;
 	if (!(dpy = wl_display_connect(NULL)))
 		return -1;
-	wl_registry_add_listener(wl_display_get_registry(dpy), &reglistener, NULL);
-	if (wl_display_roundtrip(dpy) < 0 || !comp || !shm || !shell)
+	wl_registry_add_listener(wl_display_get_registry(dpy), &reglistener, &c);
+	if (wl_display_roundtrip(dpy) < 0 || !c.comp || !c.shm || !c.shell)
 		goto disconnect_dpy;
 	if ((fd = memfd_create("lowbat", MFD_CLOEXEC)) < 0)
 		goto disconnect_dpy;
@@ -426,27 +417,27 @@ showpopup(int cap)
 		goto close_fd;
 	render(px, w, h, cap);
 	munmap(px, sz);
-	if (!(pool = wl_shm_create_pool(shm, fd, (int32_t)sz)))
+	if (!(pool = wl_shm_create_pool(c.shm, fd, (int32_t)sz)))
 		goto close_fd;
-	buf = wl_shm_pool_create_buffer(pool, 0, w, h, w * (int)sizeof(*px), WL_SHM_FORMAT_ARGB8888);
+	c.buf = wl_shm_pool_create_buffer(pool, 0, w, h, w * (int)sizeof(*px), WL_SHM_FORMAT_ARGB8888);
 	wl_shm_pool_destroy(pool);
 	close(fd);
 	fd = -1;
-	if (!buf)
+	if (!c.buf)
 		goto disconnect_dpy;
-	if (!(surf = wl_compositor_create_surface(comp)))
+	if (!(c.surf = wl_compositor_create_surface(c.comp)))
 		goto destroy_buf;
-	if (!(ls = zwlr_layer_shell_v1_get_layer_surface(shell, surf, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "lowbat")))
+	if (!(ls = zwlr_layer_shell_v1_get_layer_surface(c.shell, c.surf, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "lowbat")))
 		goto destroy_surf;
-	zwlr_layer_surface_v1_add_listener(ls, &lslistener, NULL);
+	zwlr_layer_surface_v1_add_listener(ls, &lslistener, &c);
 	zwlr_layer_surface_v1_set_size(ls, (uint32_t)w, (uint32_t)h);
 	zwlr_layer_surface_v1_set_exclusive_zone(ls, -1);
 	if (grabkbd)
 		zwlr_layer_surface_v1_set_keyboard_interactivity(ls, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
-	wl_surface_commit(surf);
+	wl_surface_commit(c.surf);
 	pfd.fd = wl_display_get_fd(dpy);
 	pfd.events = POLLIN;
-	while (!done) {
+	while (!c.done) {
 		while (wl_display_prepare_read(dpy) < 0) {
 			if (wl_display_dispatch_pending(dpy) < 0)
 				goto destroy_ls;
@@ -463,26 +454,21 @@ showpopup(int cap)
 		}
 		if (wl_display_dispatch_pending(dpy) < 0)
 			goto destroy_ls;
-		if (testpct < 0 && readsysfs("status", b, sizeof(b)) >= 0 && b[0] != 'D')
+		if (!istest && readsysfs("status", b, sizeof(b)) >= 0 && b[0] != 'D')
 			break;
 	}
 	ret = 0;
 destroy_ls:
 	zwlr_layer_surface_v1_destroy(ls);
 destroy_surf:
-	wl_surface_destroy(surf);
+	wl_surface_destroy(c.surf);
 destroy_buf:
-	wl_buffer_destroy(buf);
+	wl_buffer_destroy(c.buf);
 close_fd:
 	if (fd >= 0)
 		close(fd);
 disconnect_dpy:
 	wl_display_disconnect(dpy);
-	comp = NULL;
-	shm = NULL;
-	shell = NULL;
-	surf = NULL;
-	buf = NULL;
 	return ret;
 }
 
@@ -497,10 +483,11 @@ int
 main(int argc, char *argv[])
 {
 	char *end;
-	int cap, dis, opt, shown, want;
+	int cap, dis, opt, shown, testpct, want;
 	long val;
 
 	shown = 101;
+	testpct = -1;
 	while ((opt = getopt(argc, argv, "hns:t:v")) >= 0) {
 		switch (opt) {
 		case 'h':
@@ -534,8 +521,11 @@ main(int argc, char *argv[])
 	argc -= optind;
 	if (argc)
 		usage();
-	if (testpct >= 0)
-		return showpopup(testpct) < 0;
+	if (testpct >= 0) {
+		if (showpopup(testpct, 1) < 0)
+			return 1;
+		return 0;
+	}
 	for (;;) {
 		if (readbattery(&cap, &dis) >= 0) {
 			if (!dis) {
@@ -547,7 +537,7 @@ main(int argc, char *argv[])
 					want = LEVEL_LOW;
 				else
 					want = 0;
-				if (want && want < shown && showpopup(cap) >= 0)
+				if (want && want < shown && showpopup(cap, 0) >= 0)
 					shown = want;
 			}
 		}
