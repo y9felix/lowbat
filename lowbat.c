@@ -23,31 +23,24 @@ struct glyph {
 	uint8_t r[7];
 };
 
-static void fill(uint32_t *p, int w, int h, int x, int y, int rw, int rh, uint32_t col);
-static void drawtext(uint32_t *p, int w, int h, int cx, int y, const char *s, int sc, uint32_t col);
-static void render(uint32_t *p, int w, int h, int cap);
-static int readsysfs(const char *sub, char *b, size_t sz);
-static int readbattery(int *cap, int *dis);
+static void kbenter(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf, struct wl_array *keys);
+static void kbkey(void *d, struct wl_keyboard *k, uint32_t s, uint32_t t, uint32_t key, uint32_t st);
+static void kbleave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf);
+static void kbmap(void *d, struct wl_keyboard *k, uint32_t f, int32_t fd, uint32_t sz);
+static void kbmodifiers(void *d, struct wl_keyboard *k, uint32_t s, uint32_t dep, uint32_t lat, uint32_t lck, uint32_t grp);
+static void kbrepeatinfo(void *d, struct wl_keyboard *k, int32_t rate, int32_t delay);
+static void lscfg(void *d, struct zwlr_layer_surface_v1 *l, uint32_t s, uint32_t w, uint32_t h);
+static void lsclosed(void *d, struct zwlr_layer_surface_v1 *l);
+static void ptraxis(void *d, struct wl_pointer *p, uint32_t t, uint32_t a, wl_fixed_t v);
+static void ptrbtn(void *d, struct wl_pointer *p, uint32_t s, uint32_t t, uint32_t b, uint32_t st);
+static void ptrenter(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf, wl_fixed_t sx, wl_fixed_t sy);
+static void ptrframe(void *d, struct wl_pointer *p);
+static void ptrleave(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf);
+static void ptrmotion(void *d, struct wl_pointer *p, uint32_t t, wl_fixed_t sx, wl_fixed_t sy);
 static void regglob(void *d, struct wl_registry *r, uint32_t n, const char *i, uint32_t v);
 static void regremove(void *d, struct wl_registry *r, uint32_t n);
 static void seatcaps(void *d, struct wl_seat *s, uint32_t c);
 static void seatname(void *d, struct wl_seat *s, const char *name);
-static void lscfg(void *d, struct zwlr_layer_surface_v1 *l, uint32_t s, uint32_t w, uint32_t h);
-static void lsclosed(void *d, struct zwlr_layer_surface_v1 *l);
-static void kbmap(void *d, struct wl_keyboard *k, uint32_t f, int32_t fd, uint32_t sz);
-static void kbenter(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf, struct wl_array *keys);
-static void kbleave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *sf);
-static void kbkey(void *d, struct wl_keyboard *k, uint32_t s, uint32_t t, uint32_t key, uint32_t st);
-static void kbmodifiers(void *d, struct wl_keyboard *k, uint32_t s, uint32_t dep, uint32_t lat, uint32_t lck, uint32_t grp);
-static void kbrepeatinfo(void *d, struct wl_keyboard *k, int32_t rate, int32_t delay);
-static void ptrenter(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf, wl_fixed_t sx, wl_fixed_t sy);
-static void ptrleave(void *d, struct wl_pointer *p, uint32_t s, struct wl_surface *sf);
-static void ptrmotion(void *d, struct wl_pointer *p, uint32_t t, wl_fixed_t sx, wl_fixed_t sy);
-static void ptrbtn(void *d, struct wl_pointer *p, uint32_t s, uint32_t t, uint32_t b, uint32_t st);
-static void ptraxis(void *d, struct wl_pointer *p, uint32_t t, uint32_t a, wl_fixed_t v);
-static void ptrframe(void *d, struct wl_pointer *p);
-static int showpopup(int cap);
-static void usage(void);
 
 const struct wl_interface xdg_popup_interface;
 
@@ -418,34 +411,33 @@ showpopup(int cap)
 	ret = -1;
 	w = POPUP_WIDTH * scale;
 	h = POPUP_HEIGHT * scale;
-	sz = (size_t)w * 4 * h;
+	sz = (size_t)w * (size_t)h * sizeof(*px);
 	done = 0;
 	if (!(dpy = wl_display_connect(NULL)))
 		return -1;
 	wl_registry_add_listener(wl_display_get_registry(dpy), &reglistener, NULL);
-	wl_display_roundtrip(dpy);
-	if (!comp || !shm || !shell)
-		goto disconnectdpy;
+	if (wl_display_roundtrip(dpy) < 0 || !comp || !shm || !shell)
+		goto disconnect_dpy;
 	if ((fd = memfd_create("lowbat", MFD_CLOEXEC)) < 0)
-		goto disconnectdpy;
+		goto disconnect_dpy;
 	if (ftruncate(fd, (off_t)sz) < 0)
-		goto closefd;
+		goto close_fd;
 	if ((px = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED)
-		goto closefd;
+		goto close_fd;
 	render(px, w, h, cap);
 	munmap(px, sz);
 	if (!(pool = wl_shm_create_pool(shm, fd, (int32_t)sz)))
-		goto closefd;
-	buf = wl_shm_pool_create_buffer(pool, 0, w, h, w * 4, WL_SHM_FORMAT_ARGB8888);
+		goto close_fd;
+	buf = wl_shm_pool_create_buffer(pool, 0, w, h, w * (int)sizeof(*px), WL_SHM_FORMAT_ARGB8888);
 	wl_shm_pool_destroy(pool);
 	close(fd);
 	fd = -1;
 	if (!buf)
-		goto disconnectdpy;
+		goto disconnect_dpy;
 	if (!(surf = wl_compositor_create_surface(comp)))
-		goto destroybuf;
+		goto destroy_buf;
 	if (!(ls = zwlr_layer_shell_v1_get_layer_surface(shell, surf, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "lowbat")))
-		goto destroysurf;
+		goto destroy_surf;
 	zwlr_layer_surface_v1_add_listener(ls, &lslistener, NULL);
 	zwlr_layer_surface_v1_set_size(ls, (uint32_t)w, (uint32_t)h);
 	zwlr_layer_surface_v1_set_exclusive_zone(ls, -1);
@@ -457,34 +449,34 @@ showpopup(int cap)
 	while (!done) {
 		while (wl_display_prepare_read(dpy) < 0) {
 			if (wl_display_dispatch_pending(dpy) < 0)
-				goto destroyls;
+				goto destroy_ls;
 		}
 		if (wl_display_flush(dpy) < 0 && errno != EAGAIN) {
 			wl_display_cancel_read(dpy);
-			goto destroyls;
+			goto destroy_ls;
 		}
 		if (poll(&pfd, 1, POLL_TIMEOUT) > 0) {
 			if (wl_display_read_events(dpy) < 0)
-				goto destroyls;
+				goto destroy_ls;
 		} else {
 			wl_display_cancel_read(dpy);
 		}
 		if (wl_display_dispatch_pending(dpy) < 0)
-			goto destroyls;
+			goto destroy_ls;
 		if (testpct < 0 && readsysfs("status", b, sizeof(b)) >= 0 && b[0] != 'D')
 			break;
 	}
 	ret = 0;
-destroyls:
+destroy_ls:
 	zwlr_layer_surface_v1_destroy(ls);
-destroysurf:
+destroy_surf:
 	wl_surface_destroy(surf);
-destroybuf:
+destroy_buf:
 	wl_buffer_destroy(buf);
-closefd:
+close_fd:
 	if (fd >= 0)
 		close(fd);
-disconnectdpy:
+disconnect_dpy:
 	wl_display_disconnect(dpy);
 	comp = NULL;
 	shm = NULL;
@@ -509,7 +501,7 @@ main(int argc, char *argv[])
 	long val;
 
 	shown = 101;
-	while ((opt = getopt(argc, argv, "hns:t:v")) != -1) {
+	while ((opt = getopt(argc, argv, "hns:t:v")) >= 0) {
 		switch (opt) {
 		case 'h':
 			usage();
